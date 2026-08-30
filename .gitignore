@@ -1,0 +1,44 @@
+# HERMES AGENT BACKUP - .gitignore
+
+# === SENSITIVE FILES ===
+.env
+.env.*
+auth.json
+auth.lock
+gateway_state.json
+gateway.pid
+gateway.lock
+
+# === DATABASES ===
+*.db
+*.db-shm
+*.db-wal
+state.db*
+
+# === CACHES ===
+.cache/
+models_dev_cache.json
+ollama_cloud_models_cache.json
+.skills_prompt_snapshot.json
+.update_check
+.hermes_history
+
+# === RUNTIME ===
+sessions/
+pairing/
+sandboxes/
+logs/
+audio_cache/
+image_cache/
+images/
+
+# === BUILD ARTIFACTS ===
+scripts/*/out/
+scripts/*/lib/
+scripts/*/node_modules/
+scripts/out/
+scripts/lib/
+bin/tirith
+
+# === GIT ===
+.git/
