@@ -1,0 +1,248 @@
+rules:
+  # Rule 1: Conditional state accumulation (CashbackRewards pattern)
+  - id: conditional-state-accumulation
+    patterns:
+      - pattern: |
+          $TYPE $VAR = $MAPPING[$KEY].$FIELD1;
+          ...
+          if ($COND) {
+            ...
+            $VAR += $MAPPING[$KEY].$FIELD2;
+            ...
+          }
+      - metavariable-comparison:
+          metavariable: $FIELD1
+          comparison: $FIELD1 != $FIELD2
+    message: >
+      Variable '$VAR' reads '$FIELD1' unconditionally but only adds '$FIELD2'
+      inside a conditional branch. Other code paths skip '$FIELD2', which may
+      bypass a cap/limit check. Count ALL fields unconditionally.
+    languages: [solidity]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-682: Incorrect Calculation"
+      confidence: MEDIUM
+      impact: MEDIUM
+      references:
+        - https://github.com/base/flywheel/blob/main/src/hooks/CashbackRewards.sol
+
+  # Rule 2: Missing refund in payable function
+  - id: missing-refund-payable
+    patterns:
+      - pattern: |
+          function $FUNC(...) external payable {
+            ...
+            require(msg.value >= $EXPR);
+            ...
+          }
+      - pattern-not: |
+          function $FUNC(...) external payable {
+            ...
+            require(msg.value >= $EXPR);
+            ...
+            $RECIPIENT.transfer(msg.value - $EXPR);
+            ...
+          }
+      - pattern-not: |
+          function $FUNC(...) external payable {
+            ...
+            require(msg.value >= $EXPR);
+            ...
+            payable($RECIPIENT).transfer(msg.value - $EXPR);
+            ...
+          }
+    message: >
+      Payable function requires msg.value >= amount but has no refund for
+      excess ETH. Users overpaying cannot recover the difference.
+    languages: [solidity]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-404: Improper Resource Shutdown"
+
+  # Rule 3: Stale balance check after external call
+  - id: stale-balance-after-external-call
+    patterns:
+      - pattern: |
+          $BAL_BEFORE = $TOKEN.balanceOf($ADDR);
+          ...
+          $EXTERNAL_CALL(...);
+          ...
+          $BAL_AFTER = $TOKEN.balanceOf($ADDR);
+          ...
+          require($BAL_AFTER == $BAL_BEFORE + $AMOUNT);
+    message: >
+      Balance is read before an external call, then compared after.
+      If the external call re-enters, the before-balance is stale.
+      Use nonReentrant or checks-effects-interactions pattern.
+    languages: [solidity]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-841: Improper Enforcement of Behavioral Workflow"
+
+  # Rule 4: Unchecked operation type in validation
+  - id: unchecked-operation-enum
+    patterns:
+      - pattern: |
+          if ($OP == $ENUM.$VAL1) {
+            ...
+            $VAR += $MAPPING[$KEY].$FIELD;
+            ...
+          }
+      - pattern-not: |
+          if ($OP == $ENUM.$VAL1) {
+            ...
+          } else if ($OP == $ENUM.$VAL2) {
+            ...
+            $VAR += $MAPPING[$KEY].$FIELD;
+            ...
+          }
+    message: >
+      State field '$FIELD' is only accumulated for operation '$VAL1'.
+      Other operations ($VAL2, etc.) skip this field. Verify this is
+      intentional — inconsistent tracking can bypass limits.
+    languages: [solidity]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-682: Incorrect Calculation"
+
+  # Rule 5: Cap check with incomplete accumulator
+  - id: incomplete-cap-check
+    patterns:
+      - pattern: |
+          $TOTAL = $PREV + $AMOUNT;
+          $MAX = $PAYMENT * $BPS / $DENOM;
+          require($TOTAL <= $MAX);
+      - pattern-inside: |
+          function $FUNC(...) {
+            ...
+            if ($OP == $ENUM.$VAL) {
+              ...
+              $PREV += ...;
+              ...
+            }
+            ...
+          }
+    message: >
+      Cap check uses '$PREV' which is only fully accumulated for
+      operation '$VAL'. Other operations may bypass the cap because
+      '$PREV' doesn't include all relevant state fields.
+    languages: [solidity]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-682: Incorrect Calculation"
+      confidence: HIGH
+
+  # Rule 6: ERC4626 inflation attack — balanceOf in totalAssets
+  - id: erc4626-inflation-balanceof
+    patterns:
+      - pattern: |
+          function $FUNC(...) $RET returns (uint256) {
+            ...
+            return $TOKEN.balanceOf(address(this));
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: "total.*[Aa]sset|convert.*[Ss]hare|_total"
+    message: >
+      totalAssets-like function uses balanceOf(address(this)) directly.
+      This is vulnerable to ERC4626 inflation attack: attacker donates
+      tokens to inflate share price, causing next depositor's shares
+      to round to zero. Add virtual offset (+1) to shares and assets.
+    languages: [solidity]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-682: Incorrect Calculation"
+      confidence: HIGH
+      impact: HIGH
+      references:
+        - https://github.com/OpenZeppelin/openzeppelin-contracts/issues/3706
+
+  # Rule 7: Signature replay — hardcoded chainId
+  - id: hardcoded-chainid-replay
+    patterns:
+      - pattern: |
+          keccak256(abi.encode(
+            keccak256("EIP712Domain(...)"),
+            ...,
+            $CHAINID,
+            ...
+          ))
+      - metavariable-pattern:
+          metavariable: $CHAINID
+          pattern: |
+            1
+    message: >
+      EIP-712 domain separator uses hardcoded chainId (1).
+      Signatures can be replayed on forks or other chains.
+      Use block.chainid dynamically and cache per-chain.
+    languages: [solidity]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-294: Authentication Bypass by Capture-replay"
+
+  # Rule 8: Admin drain without limit
+  - id: admin-drain-no-limit
+    patterns:
+      - pattern: |
+          function $FUNC(...) $MOD {
+            ...
+            $TOKEN.transfer($TO, $AMT);
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $MOD
+          regex: "onlyOwner|onlyAdmin|onlyRole"
+      - pattern-not: |
+          function $FUNC(...) $MOD {
+            ...
+            require($AMT <= $LIMIT, ...);
+            ...
+          }
+    message: >
+      Admin function transfers tokens without amount limit.
+      A compromised admin key could drain all protocol funds.
+      Add withdrawal caps, timelocks, or multi-sig.
+    languages: [solidity]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-862: Missing Authorization"
+
+  # Rule 9: CEI violation — external call before state update
+  - id: cei-violation-call-before-state
+    patterns:
+      - pattern: |
+          function $FUNC(...) {
+            ...
+            $TARGET.call{...}(...);
+            ...
+            $STATE = ...;
+            ...
+          }
+      - pattern-not: |
+          function $FUNC(...) $MOD {
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $MOD
+          regex: "nonReentrant"
+    message: >
+      External call appears before state update without nonReentrant guard.
+      This may allow reentrancy: attacker re-enters during the external call
+      and reads stale state. Follow checks-effects-interactions pattern or
+      add a reentrancy guard.
+    languages: [solidity]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-841: Improper Enforcement of Behavioral Workflow"
+      confidence: MEDIUM
+      impact: HIGH

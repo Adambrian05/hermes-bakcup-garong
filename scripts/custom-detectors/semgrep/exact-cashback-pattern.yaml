@@ -1,0 +1,31 @@
+rules:
+  - id: exact-cashback-pattern
+    patterns:
+      - pattern: |
+          $TYPE $VAR = $MAPPING[$K1][$K2].$FIELD1;
+          ...
+          if ($OP == $ENUM.$VAL) {
+            ...
+            $VAR += $MAPPING[$K1][$K2].$FIELD2;
+            ...
+          }
+          ...
+          $TOTAL = $VAR + $AMT;
+          ...
+          $MAX = $PAYMENT * $BPS / $DENOM;
+          if ($TOTAL > $MAX) { ... }
+    message: >
+      EXACT CashbackRewards bug pattern detected:
+      '$VAR' reads '$FIELD1' unconditionally but only adds '$FIELD2'
+      inside the $ENUM.$VAL branch. The cap check ($TOTAL > $MAX) uses
+      an incomplete accumulator — other operations skip '$FIELD2'.
+      This allows bypassing the cap via allocate() + send().
+    languages: [solidity]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      cwe: "CWE-682: Incorrect Calculation"
+      references:
+        - "Cantina Coinbase Bounty — CashbackRewards maxRewardBps bypass"

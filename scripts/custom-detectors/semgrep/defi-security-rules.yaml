@@ -1,0 +1,73 @@
+rules:
+  # Rule 1: Oracle Staleness
+  - id: chainlink-staleness-check
+    patterns:
+      - pattern: $FEED.latestRoundData()
+      - pattern-not-inside: |
+          require($UPDATEDAT > block.timestamp - $MAXAGE, ...);
+          ...
+      - pattern-not-inside: |
+          require(block.timestamp - $UPDATEDAT < $MAXAGE, ...);
+          ...
+    message: >
+      Chainlink latestRoundData() used without staleness check. Stale or
+      manipulated prices could affect critical operations. Add:
+      require(updatedAt >= block.timestamp - MAX_ORACLE_AGE).
+    severity: ERROR
+    languages: [solidity]
+    metadata:
+      category: security
+      cwe: "CWE-345: Insufficient Verification of Data Authenticity"
+
+  # Rule 2: Division Before Multiplication
+  - id: div-before-mul-precision
+    pattern: ($A / $B) * $C
+    message: >
+      Division before multiplication causes integer truncation. In DeFi this
+      leads to interest/fee miscalculation and last-user withdrawal failure.
+      Reorder to ($A * $C) / $B or use mulDiv($A, $C, $B).
+    severity: WARNING
+    languages: [solidity]
+    metadata:
+      category: security
+      cwe: "CWE-682: Incorrect Calculation"
+
+  # Rule 3: EIP712 Missing ChainId
+  - id: eip712-missing-chainid
+    pattern: |
+      keccak256("EIP712Domain(string name,string version)")
+    message: >
+      EIP-712 domain separator missing chainId and verifyingContract.
+      Signatures can be replayed across chains. Include block.chainid
+      in domain separator.
+    severity: ERROR
+    languages: [solidity]
+    metadata:
+      category: security
+      cwe: "CWE-294: Authentication Bypass by Capture-replay"
+
+  # Rule 4: balanceOf used for voting power (simplified)
+  - id: voting-balanceof-no-snapshot
+    pattern: $TOKEN.balanceOf($VOTER)
+    message: >
+      balanceOf() used directly. If this is in a voting/governance context,
+      voting power is flash-loan manipulable. Use ERC20Votes.getPastVotes()
+      or equivalent snapshot mechanism.
+    severity: WARNING
+    languages: [solidity]
+    metadata:
+      category: security
+      cwe: "CWE-362: Concurrent Execution using Shared Resource"
+
+  # Rule 5: ecrecover without nonce (simplified)
+  - id: ecrecover-replay-risk
+    pattern: ecrecover($DIGEST, $V, $R, $S)
+    message: >
+      ecrecover used. Ensure: (1) nonce per address to prevent same-chain replay,
+      (2) chainId in EIP-712 domain to prevent cross-chain replay,
+      (3) check for address(0) return (malleability).
+    severity: WARNING
+    languages: [solidity]
+    metadata:
+      category: security
+      cwe: "CWE-294: Authentication Bypass by Capture-replay"

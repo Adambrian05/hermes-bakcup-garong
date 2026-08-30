@@ -1,0 +1,19 @@
+rules:
+  - id: cei-violation-transfer-before-state
+    patterns:
+      - pattern: |
+          $TOKEN.transfer($TO, $AMT);
+          ...
+          $STATE[$KEY] -= $AMT;
+    message: >
+      CEI VIOLATION: External token transfer happens BEFORE state update.
+      An attacker can re-enter the function before the state is updated,
+      potentially draining funds multiple times.
+      Fix: Update state BEFORE the external call.
+    languages: [solidity]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: HIGH
+      impact: HIGH
+      cwe: "CWE-841: Improper Enforcement of Behavioral Workflow"
